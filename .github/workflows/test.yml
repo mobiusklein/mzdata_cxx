@@ -40,6 +40,6 @@ jobs:
             cp --verbose --recursive target/release/*mzdata_cxx* test/lib/
             cp --verbose --recursive target/cxxbridge/* test/include
             cd test/
-            ls -R include/cxxbridge/
-            gcc -I include/cxxbridge/ -L lib/ -l mzdata_cxx test.cpp include/cxxbridge/mzdata_cxx/src/lib.rs.cc -o test_mzdata_cxx
+            ls -R include/
+            gcc -I include/ -L lib/ -l mzdata_cxx test.cpp include/mzdata_cxx/src/lib.rs.cc -o test_mzdata_cxx
             ./test_mzdata_cxx
