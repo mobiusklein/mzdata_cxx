@@ -1,0 +1,40 @@
+on: [push, pull_request]
+
+env:
+  RUST_BACKTRACE: full
+  RUST_LOG: debug
+  CARGO_PROFILE_TEST_BUILD_OVERRIDE_DEBUG: true
+
+name: Test
+jobs:
+
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest]
+    name: Test Build
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install stable toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+      - name: Run cargo build
+        uses: actions-rs/cargo@v1
+        with:
+          command: build -r
+      - name: Run clang build
+        shell: bash
+        run: |
+            cp target/release/*mzdata_cxx* test/lib/
+            cp -r target/cxxbridge test/include
+            cd test/
+            gcc -L lib/ -l mzdata_cxx test.cpp -o test_mzdata_cxx
+            ./test_mzdata_cxx
