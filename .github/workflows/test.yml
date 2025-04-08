@@ -40,5 +40,5 @@ jobs:
             cp target/release/*mzdata_cxx* test/lib/
             cp -r target/cxxbridge test/include
             cd test/
-            gcc -L lib/ -l mzdata_cxx test.cpp -o test_mzdata_cxx
+            gcc -I ./include/mzdata_cxx/ -L lib/ -l mzdata_cxx test.cpp -o test_mzdata_cxx
             ./test_mzdata_cxx
