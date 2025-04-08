@@ -37,9 +37,9 @@ jobs:
             mkdir -p test/lib/
             mkdir -p test/include/rust/
             mkdir -p test/include/mzdata_cxx/
-            cp target/release/*mzdata_cxx* test/lib/
-            cp -r target/cxxbridge test/include
+            cp --verbose --recursive target/release/*mzdata_cxx* test/lib/
+            cp --verbose --recursive target/cxxbridge/* test/include
             cd test/
-            ls -lR include/cxxbridge/
+            ls -R include/cxxbridge/
             gcc -I include/cxxbridge/ -L lib/ -l mzdata_cxx test.cpp include/cxxbridge/mzdata_cxx/src/lib.rs.cc -o test_mzdata_cxx
             ./test_mzdata_cxx
