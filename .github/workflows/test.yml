@@ -34,8 +34,9 @@ jobs:
       - name: Run clang build
         shell: bash
         run: |
-            mkdir -p test/lib
-            mkdir -p test/include
+            mkdir -p test/lib/
+            mkdir -p test/include/rust/
+            mkdir -p test/include/mzdata_cxx/
             cp target/release/*mzdata_cxx* test/lib/
             cp -r target/cxxbridge test/include
             cd test/

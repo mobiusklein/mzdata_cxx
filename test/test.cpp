@@ -1,7 +1,7 @@
-#include<memory>;
-#include<iostream>;
-#include "include/rust/cxx.h";
-#include "include/mzdata_cxx/src/lib.rs.h";
+#include<memory>
+#include<iostream>
+#include "include/rust/cxx.h"
+#include "include/mzdata_cxx/src/lib.rs.h"
 
 
 int main() {
