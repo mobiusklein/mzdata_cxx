@@ -41,5 +41,5 @@ jobs:
             cp -r target/cxxbridge test/include
             cd test/
             ls -lR include/cxxbridge/
-            gcc -I ./include/cxxbridge/ -L lib/ -l mzdata_cxx test.cpp ./include/cxxbridge/mzdata_cxx/src/lib.rs.cc -o test_mzdata_cxx
+            gcc -I include/cxxbridge/ -L lib/ -l mzdata_cxx test.cpp include/cxxbridge/mzdata_cxx/src/lib.rs.cc -o test_mzdata_cxx
             ./test_mzdata_cxx

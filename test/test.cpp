@@ -1,8 +1,7 @@
 #include<memory>
 #include<iostream>
-#include "rust/cxx.h"
-#include "mzdata_cxx/src/lib.rs.h"
-
+#include "./include/cxxbridge/rust/cxx.h"
+#include "./include/cxxbridge/mzdata_cxx/src/lib.rs.h"
 
 int main() {
     mzdata_cpp::Spectrum* spec = nullptr;
