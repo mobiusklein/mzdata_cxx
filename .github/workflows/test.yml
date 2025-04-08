@@ -29,7 +29,8 @@ jobs:
       - name: Run cargo build
         uses: actions-rs/cargo@v1
         with:
-          command: build -r
+          command: build
+          args: -r
       - name: Run clang build
         shell: bash
         run: |
