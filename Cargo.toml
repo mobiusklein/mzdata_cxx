@@ -1,0 +1,14 @@
+[package]
+name = "mzdata_cxx"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["staticlib"]
+
+[dependencies]
+cxx = { version = "1.0.153", features = ["c++20"] }
+mzdata = { path="../mzdata", features = ["mzsignal", "nalgebra"]}
+
+[build-dependencies]
+cxx-build = "1.0.153"
