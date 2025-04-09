@@ -41,6 +41,6 @@ jobs:
             cp --verbose --recursive target/cxxbridge/rust/* test
             cp --verbose --recursive target/cxxbridge/mzdata_cxx/src/* test
             cd test/
-            ls -R include/
-            g++ -v -I . -L lib/ -l mzdata_cxx test.cpp -o test_mzdata_cxx
+            ls -R
+            g++ -v -I . -L lib/ -l mzdata_cxx test.cpp lib.rs.cc -o test_mzdata_cxx
             ./test_mzdata_cxx
