@@ -9,9 +9,12 @@ use mzdata::params::{
     ControlledVocabulary as ControlledVocabularyImpl, Param as ParamImpl, ParamValueParseError,
     CURIE as CURIEImpl,
 };
-use mzdata::spectrum::IsolationWindow as IsolationWindowImpl;
 use mzdata::spectrum::{
-    Precursor as PrecursorImpl, SelectedIon as SelectedIonImpl, Spectrum as SpectrumImpl,
+    Precursor as PrecursorImpl,
+    SelectedIon as SelectedIonImpl,
+    Spectrum as SpectrumImpl,
+    MultiLayerIonMobilityFrame as IonMobilityFrameImpl,
+    IsolationWindow as IsolationWindowImpl
 };
 
 use cxx::{CxxString, CxxVector};
@@ -234,6 +237,42 @@ impl Spectrum {
             mzs_container.as_mut().push(pt.mz);
             intensities_container.as_mut().push(pt.intensity);
         }
+    }
+
+    pub fn precursor<'a>(&'a self, value: &mut Precursor<'a>) -> bool {
+        option_bool!(self.0.precursor().map(Precursor), value);
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct IonMobilityFrame(IonMobilityFrameImpl);
+
+impl IonMobilityFrame {
+    pub fn id(&self) -> &str {
+        self.0.id()
+    }
+
+    pub fn index(&self) -> usize {
+        self.0.index()
+    }
+
+    pub fn start_time(&self) -> f64 {
+        self.0.start_time()
+    }
+
+    pub fn ms_level(&self) -> u8 {
+        self.0.ms_level()
+    }
+
+    pub fn is_profile(&self) -> bool {
+        matches!(self.0.signal_continuity(), mzdata::spectrum::SignalContinuity::Profile)
+    }
+
+    pub fn ion_mobility_dimension<'a>(&'a self, out: &mut &'a [f64]) -> bool {
+        self.0.arrays.as_ref().map(|arrays| {
+            *out = arrays.ion_mobility_dimension.as_slice();
+            true
+        }).unwrap_or_default()
     }
 
     pub fn precursor<'a>(&'a self, value: &mut Precursor<'a>) -> bool {

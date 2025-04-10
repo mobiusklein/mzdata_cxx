@@ -8,7 +8,7 @@ crate-type = ["staticlib"]
 
 [dependencies]
 cxx = { version = "1.0.153", features = ["c++20"] }
-mzdata = { version = "0.52.0", features = ["mzsignal", "nalgebra"]}
+mzdata = { version = "0.52.0", default-features = false, features = ["mzsignal", "nalgebra", "mzml", "mgf", "zlib", ]}
 
 [build-dependencies]
 cxx-build = "1.0.153"
