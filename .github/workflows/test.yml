@@ -35,8 +35,6 @@ jobs:
         shell: bash
         run: |
             mkdir -p test/lib/
-            mkdir -p test/include/rust/
-            mkdir -p test/include/mzdata_cxx/
             cp --verbose --recursive target/release/*mzdata_cxx* test/lib/
             cp --verbose --recursive target/cxxbridge/rust/* test
             cp --verbose --recursive target/cxxbridge/mzdata_cxx/src/* test

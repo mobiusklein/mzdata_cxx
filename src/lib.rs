@@ -62,6 +62,7 @@ impl MZReader {
 }
 
 pub fn open(path: &str) -> io::Result<Box<MZReader>> {
+    eprintln!("Opening {path}");
     MZReader::open(path)
 }
 

@@ -1,7 +1,7 @@
 #include<memory>
 #include<iostream>
-#include "cxx.h"
-#include "lib.rs.h"
+#include<cxx.h>
+#include<lib.rs.h>
 
 int main() {
     mzdata_cpp::Spectrum* spec = nullptr;
