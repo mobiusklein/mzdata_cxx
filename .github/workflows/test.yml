@@ -37,5 +37,6 @@ jobs:
             cmake build -B build -S .
             cd build
             cp ../test/batching_test.mzML .
-            make all install
+            make all
+            ls -la .
             mzdata_cxx_test
