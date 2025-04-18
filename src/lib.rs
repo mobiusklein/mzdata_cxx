@@ -8,9 +8,7 @@ use mzdata::params::{
     CURIE as CURIEImpl,
 };
 use mzdata::spectrum::{
-    Acquisition as AcquisitionImpl, IsolationWindow as IsolationWindowImpl,
-    MultiLayerIonMobilityFrame as IonMobilityFrameImpl, Precursor as PrecursorImpl,
-    ScanEvent as ScanEventImpl, SelectedIon as SelectedIonImpl, Spectrum as SpectrumImpl,
+    Acquisition as AcquisitionImpl, HasIonMobility, IsolationWindow as IsolationWindowImpl, MultiLayerIonMobilityFrame as IonMobilityFrameImpl, Precursor as PrecursorImpl, ScanEvent as ScanEventImpl, SelectedIon as SelectedIonImpl, Spectrum as SpectrumImpl
 };
 
 use cxx::{CxxString, CxxVector};
@@ -104,11 +102,52 @@ impl MZReader {
     pub fn size(&self) -> usize {
         self.0.len()
     }
+
+    pub fn has_ion_mobility_dimension(&mut self) -> bool {
+        matches!(self.0.has_ion_mobility().unwrap_or_default(), HasIonMobility::Dimension)
+    }
+
+    pub fn into_frame_reader(self: Box<Self>) -> Result<Box<IMMZReader>, mzdata::io::IntoIonMobilityFrameSourceError> {
+        Ok(Box::new(IMMZReader(self.0.try_into_frame_source()?)))
+    }
 }
 
 pub fn open(path: &str) -> io::Result<Box<MZReader>> {
     MZReader::open(path)
 }
+
+pub struct IMMZReader(mzdata::io::IMMZReaderType<std::fs::File>);
+
+impl IMMZReader {
+    pub fn open(path: &str) -> io::Result<Box<Self>> {
+        mzdata::MZReader::open_path(path)
+            .inspect_err(|e| eprintln!("Open failed: {e}"))
+            .map(|this| this.into_frame_source())
+            .map(|this| Box::new(Self(this)))
+    }
+
+    pub fn next(&mut self) -> Result<Box<IonMobilityFrame>, &'static str> {
+        let spec = self.0.next().map(IonMobilityFrame);
+
+        option_box_or_err!(spec, "Failed to read next frame")
+    }
+
+    pub fn get_by_index(&mut self, index: usize) -> Result<Box<IonMobilityFrame>, String> {
+        option_box_or_err!(
+            self.0.get_frame_by_index(index).map(IonMobilityFrame),
+            format!("index {index} not found")
+        )
+    }
+
+    pub fn size(&self) -> usize {
+        self.0.len()
+    }
+}
+
+pub fn open_im(path: &str) -> io::Result<Box<IMMZReader>> {
+    IMMZReader::open(path)
+}
+
 
 #[derive(Debug, Clone)]
 pub struct SelectedIon(SelectedIonImpl);
@@ -786,5 +825,16 @@ pub(crate) mod ffi {
         pub fn size(&self) -> usize;
         pub fn next(&mut self) -> Result<Box<Spectrum>>;
         pub fn get_by_index(&mut self, index: usize) -> Result<Box<Spectrum>>;
+    }
+
+    extern "Rust" {
+        pub type IMMZReader;
+
+        pub fn open_im(path: &str) -> Result<Box<IMMZReader>>;
+
+        pub fn next(&mut self) -> Result<Box<IonMobilityFrame>>;
+        pub fn get_by_index(&mut self, index: usize) -> Result<Box<IonMobilityFrame>>;
+        pub fn size(&self) -> usize;
+
     }
 }

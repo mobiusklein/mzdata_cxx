@@ -39,4 +39,4 @@ jobs:
             cp ../test/batching_test.mzML .
             make all
             ls -la .
-            mzdata_cxx_test
+            ./mzdata_cxx_test
