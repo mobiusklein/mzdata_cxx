@@ -1,8 +1,6 @@
-use std::fmt::Display;
 use std::io;
 use std::pin::Pin;
 
-use mzdata::mzpeaks::{CentroidPeak, DeconvolutedPeak};
 use mzdata::prelude::*;
 
 use mzdata::params::{
@@ -10,11 +8,9 @@ use mzdata::params::{
     CURIE as CURIEImpl,
 };
 use mzdata::spectrum::{
-    Precursor as PrecursorImpl,
-    SelectedIon as SelectedIonImpl,
-    Spectrum as SpectrumImpl,
-    MultiLayerIonMobilityFrame as IonMobilityFrameImpl,
-    IsolationWindow as IsolationWindowImpl
+    Acquisition as AcquisitionImpl, IsolationWindow as IsolationWindowImpl,
+    MultiLayerIonMobilityFrame as IonMobilityFrameImpl, Precursor as PrecursorImpl,
+    ScanEvent as ScanEventImpl, SelectedIon as SelectedIonImpl, Spectrum as SpectrumImpl,
 };
 
 use cxx::{CxxString, CxxVector};
@@ -41,19 +37,68 @@ macro_rules! option_bool {
     };
 }
 
+macro_rules! option_box_or_err {
+    ($op:expr, $err:literal) => {
+        match $op {
+            Some(item) => Ok(Box::new(item)),
+            None => Err($err.into()),
+        }
+    };
+    ($op:expr, $err:expr) => {
+        match $op {
+            Some(item) => Ok(Box::new(item)),
+            None => Err($err),
+        }
+    };
+}
+
+macro_rules! param_methods {
+    () => {
+        pub fn param(&self, index: usize) -> Result<Box<Param>, String> {
+            option_box_or_err!(
+                self.0.params().get(index).cloned().map(Param),
+                "Parameter not found"
+            )
+        }
+
+        pub fn params(&self) -> Vec<Param> {
+            self.0.params().iter().cloned().map(|p| Param(p)).collect()
+        }
+
+        pub fn get_param_by_curie(&self, curie: &ffi::CURIE) -> Result<Box<Param>, String> {
+            let params = self.0.params();
+            if let Some(val) = params
+                .get_param_by_curie(&(*curie).into())
+                .map(|p| Param(p.clone()))
+            {
+                Ok(Box::new(val))
+            } else {
+                Err(format!("{} not found", CURIEImpl::from(*curie)))
+            }
+        }
+    };
+}
+
 pub struct MZReader(mzdata::MZReader<std::fs::File>);
 
 impl MZReader {
     pub fn open(path: &str) -> io::Result<Box<Self>> {
-        mzdata::MZReader::open_path(path).map(|this| Box::new(Self(this)))
+        mzdata::MZReader::open_path(path)
+            .inspect_err(|e| eprintln!("Open failed: {e}"))
+            .map(|this| Box::new(Self(this)))
     }
 
-    pub fn next(&mut self, value: &mut Spectrum) -> bool {
-        option_bool!(self.0.next().map(Spectrum), value);
+    pub fn next(&mut self) -> Result<Box<Spectrum>, &'static str> {
+        let spec = self.0.next().map(Spectrum);
+
+        option_box_or_err!(spec, "Failed to read next spectrum")
     }
 
-    pub fn get_by_index(&mut self, index: usize, value: &mut Spectrum) -> bool {
-        option_bool!(self.0.get_spectrum_by_index(index).map(Spectrum), value);
+    pub fn get_by_index(&mut self, index: usize) -> Result<Box<Spectrum>, String> {
+        option_box_or_err!(
+            self.0.get_spectrum_by_index(index).map(Spectrum),
+            format!("index {index} not found")
+        )
     }
 
     pub fn size(&self) -> usize {
@@ -62,24 +107,15 @@ impl MZReader {
 }
 
 pub fn open(path: &str) -> io::Result<Box<MZReader>> {
-    eprintln!("Opening {path}");
     MZReader::open(path)
 }
 
 #[derive(Debug, Clone)]
 pub struct SelectedIon(SelectedIonImpl);
 
-impl ParamDescribed for SelectedIon {
-    fn params(&self) -> &[mzdata::params::Param] {
-        <SelectedIonImpl as ParamDescribed>::params(&self.0)
-    }
-
-    fn params_mut(&mut self) -> &mut mzdata::params::ParamList {
-        <SelectedIonImpl as ParamDescribed>::params_mut(&mut self.0)
-    }
+impl SelectedIon {
+    param_methods!();
 }
-
-impl IonMobilityMeasure for SelectedIon {}
 
 impl IonProperties for SelectedIon {
     #[inline]
@@ -114,13 +150,10 @@ impl Precursor<'_> {
         option_bool!(self.0.ions.first().and_then(|i| i.ion_mobility()), value)
     }
 
-    pub fn isolation_window(&self, value: &mut IsolationWindow) -> bool {
+    pub fn isolation_window(&self) -> Result<Box<IsolationWindow>, &'static str> {
         match self.0.isolation_window.flags {
-            mzdata::spectrum::IsolationWindowState::Unknown => false,
-            _ => {
-                *value = IsolationWindow(self.0.isolation_window.clone());
-                true
-            }
+            mzdata::spectrum::IsolationWindowState::Unknown => Err("No isolation window found"),
+            _ => Ok(Box::new(IsolationWindow(self.0.isolation_window.clone()))),
         }
     }
 
@@ -133,68 +166,119 @@ impl Precursor<'_> {
         self.0.activation.is_combined()
     }
 
-    pub fn activation_methods(&self) -> Vec<CURIE> {
-        self.0.activation.methods().iter().map(|method| {
-            let acc = method.accession();
-            let cv = method.controlled_vocabulary();
-            let c = CURIE(CURIEImpl::new(cv, acc));
-            c
-        }).collect()
+    pub fn activation_methods(&self) -> Vec<ffi::CURIE> {
+        self.0
+            .activation
+            .methods()
+            .iter()
+            .map(|method| {
+                let acc = method.accession();
+                let cv = method.controlled_vocabulary();
+                let c = ffi::CURIE::from(CURIEImpl::new(cv, acc));
+                c
+            })
+            .collect()
     }
 
-    pub fn activation_method(&self, value: &mut CURIE) -> bool {
+    pub fn activation_method(&self, value: &mut ffi::CURIE) -> bool {
         if let Some(method) = self.0.activation.method() {
             let acc = method.accession();
             let cv = method.controlled_vocabulary();
-            *value = CURIE(CURIEImpl::new(cv, acc));
+            *value = ffi::CURIE::from(CURIEImpl::new(cv, acc));
             true
         } else {
             false
         }
-
     }
 }
 
 #[derive(Debug, Clone)]
+pub struct Acquisition<'a>(&'a AcquisitionImpl);
+
+impl<'a> Acquisition<'a> {
+    pub fn first_scan(&self) -> Result<Box<ScanEvent<'_>>, &'static str> {
+        self.0
+            .first_scan()
+            .map(|s| Box::new(ScanEvent(s)))
+            .ok_or("Scan not found")
+    }
+
+    pub fn scan(&self, index: usize) -> Result<Box<ScanEvent<'_>>, &'static str> {
+        self.0
+            .scans
+            .get(index)
+            .map(|s| Box::new(ScanEvent(s)))
+            .ok_or("Scan not found")
+    }
+
+    pub fn instrument_configuration_ids(&self) -> Vec<u32> {
+        self.0.instrument_configuration_ids()
+    }
+
+    pub fn start_time(&self) -> f64 {
+        self.0.start_time()
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    param_methods!();
+}
+
+#[derive(Debug, Clone)]
+pub struct ScanEvent<'a>(&'a ScanEventImpl);
+
+impl<'a> ScanEvent<'a> {
+    param_methods!();
+
+    pub fn start_time(&self) -> f64 {
+        self.0.start_time
+    }
+
+    pub fn injection_time(&self) -> f32 {
+        self.0.injection_time
+    }
+
+    pub fn instrument_configuration_id(&self) -> u32 {
+        self.0.instrument_configuration_id
+    }
+
+    pub fn has_ion_mobility(&self) -> bool {
+        self.0.has_ion_mobility()
+    }
+
+    pub fn ion_mobility(&self, value: &mut f64) -> bool {
+        if let Some(val) = self.0.ion_mobility() {
+            *value = val;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn filter_string(&self, mut out: Pin<&mut CxxString>) -> bool {
+        self.0.filter_string().map(|s| {
+            out.as_mut().clear();
+            out.as_mut().push_str(&s);
+            true
+        }).unwrap_or_default()
+    }
+
+    pub fn scan_configuration(&self, mut out: Pin<&mut CxxString>) -> bool {
+        if let Some(val) = self.0.scan_configuration() {
+            out.as_mut().push_str(&val.to_string());
+            true
+        } else {
+            false
+        }
+    }
+
+
+}
+
+#[derive(Debug, Clone)]
 pub struct Spectrum(SpectrumImpl);
-
-impl ParamDescribed for Spectrum {
-    fn params(&self) -> &[mzdata::params::Param] {
-        <SpectrumImpl as ParamDescribed>::params(&self.0)
-    }
-
-    fn params_mut(&mut self) -> &mut mzdata::params::ParamList {
-        <SpectrumImpl as ParamDescribed>::params_mut(&mut self.0)
-    }
-}
-
-impl SpectrumLike for Spectrum {
-    #[inline]
-    fn description(&self) -> &mzdata::spectrum::SpectrumDescription {
-        <SpectrumImpl as SpectrumLike>::description(&self.0)
-    }
-
-    fn description_mut(&mut self) -> &mut mzdata::spectrum::SpectrumDescription {
-        <SpectrumImpl as SpectrumLike>::description_mut(&mut self.0)
-    }
-
-    fn peaks(&'_ self) -> mzdata::spectrum::RefPeakDataLevel<'_, CentroidPeak, DeconvolutedPeak> {
-        <SpectrumImpl as SpectrumLike>::peaks(&self.0)
-    }
-
-    fn raw_arrays(&'_ self) -> Option<&'_ mzdata::spectrum::BinaryArrayMap> {
-        <SpectrumImpl as SpectrumLike>::raw_arrays(&self.0)
-    }
-
-    fn into_peaks_and_description(
-        self,
-    ) -> (
-        mzdata::spectrum::PeakDataLevel,
-        mzdata::spectrum::SpectrumDescription,
-    ) {
-        <SpectrumImpl as SpectrumLike>::into_peaks_and_description(self.0)
-    }
-}
 
 impl Spectrum {
     pub fn id(&self) -> &str {
@@ -214,7 +298,10 @@ impl Spectrum {
     }
 
     pub fn is_profile(&self) -> bool {
-        matches!(self.0.signal_continuity(), mzdata::spectrum::SignalContinuity::Profile)
+        matches!(
+            self.0.signal_continuity(),
+            mzdata::spectrum::SignalContinuity::Profile
+        )
     }
 
     pub fn mzs_into(&self, mut container: Pin<&mut CxxVector<f64>>) {
@@ -240,9 +327,15 @@ impl Spectrum {
         }
     }
 
-    pub fn precursor<'a>(&'a self, value: &mut Precursor<'a>) -> bool {
-        option_bool!(self.0.precursor().map(Precursor), value);
+    pub fn precursor(&self) -> Result<Box<Precursor<'_>>, String> {
+        option_box_or_err!(self.0.precursor().map(Precursor), "No precursor found")
     }
+
+    pub fn acquisition(&self) -> Box<Acquisition<'_>> {
+        Box::new(Acquisition(self.0.acquisition()))
+    }
+
+    param_methods!();
 }
 
 #[derive(Debug, Clone)]
@@ -266,19 +359,61 @@ impl IonMobilityFrame {
     }
 
     pub fn is_profile(&self) -> bool {
-        matches!(self.0.signal_continuity(), mzdata::spectrum::SignalContinuity::Profile)
+        matches!(
+            self.0.signal_continuity(),
+            mzdata::spectrum::SignalContinuity::Profile
+        )
     }
 
-    pub fn ion_mobility_dimension<'a>(&'a self, out: &mut &'a [f64]) -> bool {
-        self.0.arrays.as_ref().map(|arrays| {
-            *out = arrays.ion_mobility_dimension.as_slice();
-            true
-        }).unwrap_or_default()
+    pub fn ion_mobility_dimension(&self, mut out: Pin<&mut CxxVector<f64>>) -> bool {
+        self.0
+            .arrays
+            .as_ref()
+            .map(|arrays| {
+                let vals = arrays.ion_mobility_dimension.as_slice();
+                for val in vals {
+                    out.as_mut().push(*val);
+                }
+                true
+            })
+            .unwrap_or_default()
     }
 
-    pub fn precursor<'a>(&'a self, value: &mut Precursor<'a>) -> bool {
-        option_bool!(self.0.precursor().map(Precursor), value);
+    pub fn signal_at_ion_mobility_index_into(
+        &self,
+        ion_mobility_index: usize,
+        mut mzs_container: Pin<&mut CxxVector<f64>>,
+        mut intensities_container: Pin<&mut CxxVector<f32>>,
+        ion_mobility: &mut f64,
+    ) {
+        if let Some(maps) = self.0.arrays.as_ref() {
+            if let Some(val) = maps.ion_mobility_dimension.get(ion_mobility_index) {
+                *ion_mobility = *val;
+            }
+            if let Some(arrays) = maps.arrays.get(ion_mobility_index) {
+                if let Some(mzs) = arrays.mzs().ok() {
+                    for mz in mzs.iter().copied() {
+                        mzs_container.as_mut().push(mz);
+                    }
+                }
+                if let Some(ints) = arrays.intensities().ok() {
+                    for int in ints.iter().copied() {
+                        intensities_container.as_mut().push(int);
+                    }
+                }
+            }
+        }
     }
+
+    pub fn precursor(&self) -> Result<Box<Precursor<'_>>, String> {
+        option_box_or_err!(self.0.precursor().map(Precursor), "No precursor found")
+    }
+
+    pub fn acquisition(&self) -> Box<Acquisition<'_>> {
+        Box::new(Acquisition(self.0.acquisition()))
+    }
+
+    param_methods!();
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -373,9 +508,9 @@ impl Param {
         self.0.name()
     }
 
-    pub fn curie(&self, value: &mut CURIE) -> bool {
+    pub fn curie(&self, value: &mut ffi::CURIE) -> bool {
         if let Some(val) = self.0.curie() {
-            *value = CURIE(val);
+            *value = ffi::CURIE::from(val);
             true
         } else {
             false
@@ -386,7 +521,7 @@ impl Param {
         self.0.is_controlled()
     }
 
-    pub fn controlled_vocabulary(&self, value: &mut param_ffi::ControlledVocabulary) -> bool {
+    pub fn controlled_vocabulary(&self, value: &mut ffi::ControlledVocabulary) -> bool {
         match self.0.controlled_vocabulary.map(|c| c.into()) {
             Some(x) => {
                 *value = x;
@@ -440,72 +575,74 @@ impl IsolationWindow {
     }
 }
 
-impl From<param_ffi::ControlledVocabulary> for ControlledVocabularyImpl {
-    fn from(value: param_ffi::ControlledVocabulary) -> Self {
+impl From<ffi::ControlledVocabulary> for ControlledVocabularyImpl {
+    fn from(value: ffi::ControlledVocabulary) -> Self {
         match value {
-            param_ffi::ControlledVocabulary::MS => Self::MS,
-            param_ffi::ControlledVocabulary::UO => Self::UO,
-            param_ffi::ControlledVocabulary::EFO => Self::EFO,
-            param_ffi::ControlledVocabulary::OBI => Self::OBI,
-            param_ffi::ControlledVocabulary::HANCESTRO => Self::HANCESTRO,
-            param_ffi::ControlledVocabulary::BFO => Self::BFO,
-            param_ffi::ControlledVocabulary::NCIT => Self::NCIT,
-            param_ffi::ControlledVocabulary::BTO => Self::BTO,
-            param_ffi::ControlledVocabulary::PRIDE => Self::PRIDE,
-            param_ffi::ControlledVocabulary::Unknown => Self::Unknown,
+            ffi::ControlledVocabulary::MS => Self::MS,
+            ffi::ControlledVocabulary::UO => Self::UO,
+            ffi::ControlledVocabulary::EFO => Self::EFO,
+            ffi::ControlledVocabulary::OBI => Self::OBI,
+            ffi::ControlledVocabulary::HANCESTRO => Self::HANCESTRO,
+            ffi::ControlledVocabulary::BFO => Self::BFO,
+            ffi::ControlledVocabulary::NCIT => Self::NCIT,
+            ffi::ControlledVocabulary::BTO => Self::BTO,
+            ffi::ControlledVocabulary::PRIDE => Self::PRIDE,
+            ffi::ControlledVocabulary::Unknown => Self::Unknown,
             _ => Self::Unknown,
         }
     }
 }
 
-impl From<ControlledVocabularyImpl> for param_ffi::ControlledVocabulary {
-    fn from(value: ControlledVocabularyImpl) -> param_ffi::ControlledVocabulary {
+impl From<ControlledVocabularyImpl> for ffi::ControlledVocabulary {
+    fn from(value: ControlledVocabularyImpl) -> ffi::ControlledVocabulary {
         match value {
-            ControlledVocabularyImpl::MS => param_ffi::ControlledVocabulary::MS,
-            ControlledVocabularyImpl::UO => param_ffi::ControlledVocabulary::UO,
-            ControlledVocabularyImpl::EFO => param_ffi::ControlledVocabulary::EFO,
-            ControlledVocabularyImpl::OBI => param_ffi::ControlledVocabulary::OBI,
-            ControlledVocabularyImpl::HANCESTRO => param_ffi::ControlledVocabulary::HANCESTRO,
-            ControlledVocabularyImpl::BFO => param_ffi::ControlledVocabulary::BFO,
-            ControlledVocabularyImpl::NCIT => param_ffi::ControlledVocabulary::NCIT,
-            ControlledVocabularyImpl::BTO => param_ffi::ControlledVocabulary::BTO,
-            ControlledVocabularyImpl::PRIDE => param_ffi::ControlledVocabulary::PRIDE,
-            ControlledVocabularyImpl::Unknown => param_ffi::ControlledVocabulary::Unknown,
+            ControlledVocabularyImpl::MS => ffi::ControlledVocabulary::MS,
+            ControlledVocabularyImpl::UO => ffi::ControlledVocabulary::UO,
+            ControlledVocabularyImpl::EFO => ffi::ControlledVocabulary::EFO,
+            ControlledVocabularyImpl::OBI => ffi::ControlledVocabulary::OBI,
+            ControlledVocabularyImpl::HANCESTRO => ffi::ControlledVocabulary::HANCESTRO,
+            ControlledVocabularyImpl::BFO => ffi::ControlledVocabulary::BFO,
+            ControlledVocabularyImpl::NCIT => ffi::ControlledVocabulary::NCIT,
+            ControlledVocabularyImpl::BTO => ffi::ControlledVocabulary::BTO,
+            ControlledVocabularyImpl::PRIDE => ffi::ControlledVocabulary::PRIDE,
+            ControlledVocabularyImpl::Unknown => ffi::ControlledVocabulary::Unknown,
         }
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct CURIE(CURIEImpl);
-
-impl CURIE {
-    pub fn controlled_vocabulary(&self) -> param_ffi::ControlledVocabulary {
-        self.0.controlled_vocabulary.into()
-    }
-
-    pub fn accession(&self) -> u32 {
-        self.0.accession
-    }
-
-    pub fn as_param(&self) -> Param {
-        Param(self.0.as_param())
-    }
-
-    pub fn to_string(&self) -> String {
-        self.0.to_string()
+impl From<CURIEImpl> for ffi::CURIE {
+    fn from(value: CURIEImpl) -> Self {
+        Self {
+            controlled_vocabulary: value.controlled_vocabulary.into(),
+            accession: value.accession,
+        }
     }
 }
 
-impl Display for CURIE {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        <CURIEImpl as Display>::fmt(&self.0, f)
+impl From<ffi::CURIE> for CURIEImpl {
+    fn from(value: ffi::CURIE) -> Self {
+        Self {
+            controlled_vocabulary: value.controlled_vocabulary.into(),
+            accession: value.accession,
+        }
     }
+}
+
+pub fn curie_to_string(curie: &ffi::CURIE) -> String {
+    CURIEImpl::from(*curie).to_string()
+}
+
+#[derive(Clone)]
+pub struct ParameterContainer<'a>(&'a dyn ParamDescribedRead);
+
+impl<'a> ParameterContainer<'a> {
+    param_methods!();
 }
 
 #[cxx::bridge(namespace = "mzdata_cpp")]
-pub(crate) mod param_ffi {
+pub(crate) mod ffi {
 
-    #[derive(Clone, Copy, PartialEq)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub enum ControlledVocabulary {
         MS,
         UO,
@@ -519,13 +656,14 @@ pub(crate) mod param_ffi {
         Unknown,
     }
 
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct CURIE {
+        pub controlled_vocabulary: ControlledVocabulary,
+        pub accession: u32,
+    }
+
     extern "Rust" {
         pub type Param;
-        pub type CURIE;
-
-        pub fn controlled_vocabulary(self: &CURIE) -> ControlledVocabulary;
-        pub fn accession(self: &CURIE) -> u32;
-        pub fn to_string(self: &CURIE) -> String;
 
         pub fn name(self: &Param) -> &str;
         pub fn is_controlled(self: &Param) -> bool;
@@ -553,7 +691,7 @@ pub(crate) mod param_ffi {
         pub fn selected_mz(&self, value: &mut f64) -> bool;
         pub fn selected_charge(&self, value: &mut i32) -> bool;
         pub fn selected_ion_mobility(&self, value: &mut f64) -> bool;
-        pub fn isolation_window(&self, value: &mut IsolationWindow) -> bool;
+        pub fn isolation_window(&self) -> Result<Box<IsolationWindow>>;
         pub fn activation_energy(&self, value: &mut f32) -> bool;
         pub fn activation_method_is_combined(&self) -> bool;
         pub fn activation_methods(&self) -> Vec<CURIE>;
@@ -561,7 +699,37 @@ pub(crate) mod param_ffi {
     }
 
     extern "Rust" {
+        pub type ScanEvent<'a>;
 
+        pub fn start_time(&self) -> f64;
+        pub fn injection_time(&self) -> f32;
+        pub fn instrument_configuration_id(&self) -> u32;
+        pub fn ion_mobility(&self, value: &mut f64) -> bool;
+        pub fn has_ion_mobility(&self) -> bool;
+
+        pub fn scan_configuration(&self, mut out: Pin<&mut CxxString>) -> bool;
+        pub fn filter_string(&self, mut out: Pin<&mut CxxString>) -> bool;
+
+        pub fn param(&self, index: usize) -> Result<Box<Param>>;
+        pub fn params(&self) -> Vec<Param>;
+        pub fn get_param_by_curie(&self, curie: &CURIE) -> Result<Box<Param>>;
+    }
+
+    extern "Rust" {
+        pub type Acquisition<'a>;
+
+        pub unsafe fn first_scan<'a>(&'a self) -> Result<Box<ScanEvent<'a>>>;
+        pub unsafe fn scan<'a>(&'a self, index: usize) -> Result<Box<ScanEvent<'a>>>;
+        pub fn instrument_configuration_ids(&self) -> Vec<u32>;
+        pub fn start_time(&self) -> f64;
+        pub fn len(&self) -> usize;
+
+        pub fn param(&self, index: usize) -> Result<Box<Param>>;
+        pub fn params(&self) -> Vec<Param>;
+        pub fn get_param_by_curie(&self, curie: &CURIE) -> Result<Box<Param>>;
+    }
+
+    extern "Rust" {
         pub type Spectrum;
 
         pub fn mzs_into(&self, mut container: Pin<&mut CxxVector<f64>>);
@@ -577,7 +745,37 @@ pub(crate) mod param_ffi {
         pub fn start_time(&self) -> f64;
         pub fn ms_level(&self) -> u8;
         pub fn is_profile(&self) -> bool;
-        pub unsafe fn precursor<'a>(&'a self, value: &mut Precursor<'a>) -> bool;
+        pub unsafe fn precursor<'a>(&'a self) -> Result<Box<Precursor<'a>>>;
+        pub unsafe fn acquisition<'a>(&'a self) -> Box<Acquisition<'a>>;
+
+        pub fn param(&self, index: usize) -> Result<Box<Param>>;
+        pub fn params(&self) -> Vec<Param>;
+        pub fn get_param_by_curie(&self, curie: &CURIE) -> Result<Box<Param>>;
+    }
+
+    extern "Rust" {
+        pub type IonMobilityFrame;
+
+        pub fn id(&self) -> &str;
+        pub fn index(&self) -> usize;
+        pub fn start_time(&self) -> f64;
+        pub fn ms_level(&self) -> u8;
+        pub fn is_profile(&self) -> bool;
+        pub unsafe fn precursor<'a>(&'a self) -> Result<Box<Precursor<'a>>>;
+
+        pub fn ion_mobility_dimension(&self, mut out: Pin<&mut CxxVector<f64>>) -> bool;
+
+        pub fn param(&self, index: usize) -> Result<Box<Param>>;
+        pub fn params(&self) -> Vec<Param>;
+        pub fn get_param_by_curie(&self, curie: &CURIE) -> Result<Box<Param>>;
+
+        pub fn signal_at_ion_mobility_index_into(
+            &self,
+            ion_mobility_index: usize,
+            mut mzs_container: Pin<&mut CxxVector<f64>>,
+            mut intensities_container: Pin<&mut CxxVector<f32>>,
+            ion_mobility: &mut f64,
+        );
     }
 
     extern "Rust" {
@@ -586,6 +784,7 @@ pub(crate) mod param_ffi {
         pub fn open(path: &str) -> Result<Box<MZReader>>;
 
         pub fn size(&self) -> usize;
-        pub fn next(&mut self, value: &mut Spectrum) -> bool;
+        pub fn next(&mut self) -> Result<Box<Spectrum>>;
+        pub fn get_by_index(&mut self, index: usize) -> Result<Box<Spectrum>>;
     }
 }

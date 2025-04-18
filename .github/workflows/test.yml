@@ -34,11 +34,8 @@ jobs:
       - name: Run clang build
         shell: bash
         run: |
-            mkdir -p test/lib/
-            cp --verbose --recursive target/release/*mzdata_cxx* test/lib/
-            cp --verbose --recursive target/cxxbridge/rust/* test
-            cp --verbose --recursive target/cxxbridge/mzdata_cxx/src/* test
-            cd test/
-            ls -R
-            g++ -v -I . -L lib/ -l mzdata_cxx test.cpp lib.rs.cc -o test_mzdata_cxx
-            ./test_mzdata_cxx
+            cmake build -B build -S .
+            cd build
+            cp ../test/batching_test.mzML .
+            make all install
+            mzdata_cxx_test
