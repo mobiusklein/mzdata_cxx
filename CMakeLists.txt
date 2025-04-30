@@ -6,8 +6,8 @@ set(CMAKE_CXX_STANDARD 20)
 set(CARGO_MANIFEST ${CMAKE_SOURCE_DIR}/Cargo.toml)
 set(CARGO_TARGET_DIR ${CMAKE_SOURCE_DIR}/target)
 
-set(MZDATA_SOURCE_FILE ${CMAKE_SOURCE_DIR}/src/lib.rs)
-set(MZDATA_BRIDGE_CPP ${CARGO_TARGET_DIR}/cxxbridge/mzdata_cxx/src/lib.rs.cc)
+set(MZDATA_SOURCE_FILE ${CMAKE_SOURCE_DIR}/src/mzdata_cxx.rs)
+set(MZDATA_BRIDGE_CPP ${CARGO_TARGET_DIR}/cxxbridge/mzdata_cxx/src/mzdata_cxx.rs.cc)
 set(MZDATA_LIB ${CARGO_TARGET_DIR}/release/${CMAKE_STATIC_LIBRARY_PREFIX}mzdata_cxx${CMAKE_STATIC_LIBRARY_SUFFIX})
 
 # Add a custom command that builds the rust crate and generates C++ bridge code
