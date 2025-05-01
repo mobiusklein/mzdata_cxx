@@ -112,6 +112,7 @@ impl MZReader {
         )
     }
 
+    #[allow(unused)]
     pub fn into_frame_reader(
         self: Box<Self>,
     ) -> Result<Box<IMMZReader>, mzdata::io::IntoIonMobilityFrameSourceError> {
@@ -159,6 +160,20 @@ pub fn open_im(path: &str) -> io::Result<Box<IMMZReader>> {
 pub struct SelectedIon(SelectedIonImpl);
 
 impl SelectedIon {
+
+    pub fn selected_mz(&self, value: &mut f64) -> bool {
+        *value = self.mz();
+        true
+    }
+
+    pub fn selected_charge(&self, value: &mut i32) -> bool {
+        option_bool!(self.0.charge(), value)
+    }
+
+    pub fn selected_ion_mobility(&self, value: &mut f64) -> bool {
+        option_bool!(self.0.ion_mobility(), value)
+    }
+
     param_methods!();
 }
 
@@ -200,6 +215,16 @@ impl Precursor<'_> {
             mzdata::spectrum::IsolationWindowState::Unknown => Err("No isolation window found"),
             _ => Ok(Box::new(IsolationWindow(self.0.isolation_window.clone()))),
         }
+    }
+
+    pub fn ion(&self, index: usize) -> Result<Box<SelectedIon>, &'static str> {
+        self.0.ions.get(index).map(
+            |ion| Box::new(SelectedIon(ion.clone()))
+        ).ok_or("Index out of bounds")
+    }
+
+    pub fn ion_size(&self) -> usize {
+        self.0.ions.len()
     }
 
     pub fn activation_energy(&self, value: &mut f32) -> bool {
@@ -910,6 +935,20 @@ pub(crate) mod ffi {
         pub fn activation_method_is_combined(&self) -> bool;
         pub fn activation_methods(&self) -> Vec<CURIE>;
         pub fn activation_method(&self, value: &mut CURIE) -> bool;
+        pub fn ion(&self, index: usize) -> Result<Box<SelectedIon>>;
+        pub fn ion_size(&self) -> usize;
+    }
+
+    extern "Rust" {
+        pub type SelectedIon;
+
+        pub fn selected_mz(&self, value: &mut f64) -> bool;
+        pub fn selected_charge(&self, value: &mut i32) -> bool;
+        pub fn selected_ion_mobility(&self, value: &mut f64) -> bool;
+
+        pub fn param(&self, index: usize) -> Result<Box<Param>>;
+        pub fn params(&self) -> Vec<Param>;
+        pub fn get_param_by_curie(&self, curie: &CURIE) -> Result<Box<Param>>;
     }
 
     extern "Rust" {
@@ -982,6 +1021,7 @@ pub(crate) mod ffi {
         pub fn is_profile(&self) -> bool;
 
         pub unsafe fn precursor<'a>(&'a self) -> Result<Box<Precursor<'a>>>;
+        pub unsafe fn acquisition<'a>(&'a self) -> Box<Acquisition<'a>>;
 
         pub fn ion_mobility_unit(&self) -> Unit;
         pub fn ion_mobility_dimension(&self, mut out: Pin<&mut CxxVector<f64>>) -> bool;
@@ -1014,6 +1054,7 @@ pub(crate) mod ffi {
         pub fn size(&self) -> usize;
         pub fn next(&mut self) -> Result<Box<Spectrum>>;
         pub fn get_by_index(&mut self, index: usize) -> Result<Box<Spectrum>>;
+        pub fn has_ion_mobility_dimension(&mut self) -> bool;
     }
 
     extern "Rust" {
